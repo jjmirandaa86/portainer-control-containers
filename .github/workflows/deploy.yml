@@ -1,14 +1,13 @@
-# Secrets requeridos (Settings → Secrets and variables → Actions):
-#   SSH_KEY          — clave privada SSH del droplet
-#   SERVER_IP        — IP del droplet
-
-name: CI/CD Deploy Portainer DigitalOcean Sydney
+name: Deploy Portainer
 
 on:
   push:
     branches:
       - main
-
+    paths:
+      - "docker-compose.yml"
+      - "scripts/deploy-remote.sh"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 concurrency:
@@ -17,26 +16,43 @@ concurrency:
 
 jobs:
   deploy:
+    name: Deploy Portainer to VPS
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup SSH
+      - name: Prepare SSH
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           SERVER_IP: ${{ secrets.SERVER_IP }}
         run: |
+          set -eu
+
           mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
 
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
-
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
           ssh-keyscan -H "$SERVER_IP" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
-      - name: Upload Portainer configuration
+      - name: Validate deployment files
+        run: |
+          set -eu
+
+          test -f docker-compose.yml
+          test -f scripts/deploy-remote.sh
+
+          # Fix Windows line endings before uploading.
+          sed -i 's/\r$//' scripts/deploy-remote.sh
+          chmod +x scripts/deploy-remote.sh
+
+          echo "Deployment files validated."
+
+      - name: Prepare remote directory
         env:
           SERVER_IP: ${{ secrets.SERVER_IP }}
         run: |
@@ -44,6 +60,10 @@ jobs:
             root@"$SERVER_IP" \
             "mkdir -p /app/portainer"
 
+      - name: Upload deployment files
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+        run: |
           scp -i ~/.ssh/id_rsa \
             docker-compose.yml \
             root@"$SERVER_IP":/app/portainer/docker-compose.yml
@@ -58,4 +78,4 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa \
             root@"$SERVER_IP" \
-            "bash /app/portainer/deploy-remote.sh"
+            "sed -i 's/\r$//' /app/portainer/deploy-remote.sh && chmod +x /app/portainer/deploy-remote.sh && bash /app/portainer/deploy-remote.sh"
