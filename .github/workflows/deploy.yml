@@ -1,0 +1,61 @@
+# Secrets requeridos (Settings → Secrets and variables → Actions):
+#   SSH_KEY          — clave privada SSH del droplet
+#   SERVER_IP        — IP del droplet
+
+name: CI/CD Deploy Portainer DigitalOcean Sydney
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+concurrency:
+  group: portainer-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+        run: |
+          mkdir -p ~/.ssh
+
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+
+          chmod 600 ~/.ssh/id_rsa
+
+          ssh-keyscan -H "$SERVER_IP" >> ~/.ssh/known_hosts
+
+      - name: Upload Portainer configuration
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+        run: |
+          ssh -i ~/.ssh/id_rsa \
+            root@"$SERVER_IP" \
+            "mkdir -p /app/portainer"
+
+          scp -i ~/.ssh/id_rsa \
+            docker-compose.yml \
+            root@"$SERVER_IP":/app/portainer/docker-compose.yml
+
+          scp -i ~/.ssh/id_rsa \
+            scripts/deploy-remote.sh \
+            root@"$SERVER_IP":/app/portainer/deploy-remote.sh
+
+      - name: Deploy Portainer
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+        run: |
+          ssh -i ~/.ssh/id_rsa \
+            root@"$SERVER_IP" \
+            "bash /app/portainer/deploy-remote.sh"
